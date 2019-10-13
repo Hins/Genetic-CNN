@@ -200,3 +200,7 @@ class DAG(object):
 
     def size(self):
         return len(self.graph)
+
+    def toString(self):
+        for node, edges in self.graph.items():
+            print('structure %s: %s' % (node, ','.join([str(edge) for edge in edges])))

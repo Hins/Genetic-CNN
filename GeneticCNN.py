@@ -9,15 +9,47 @@ from dag import DAG, DAGValidationError
 import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
 
-
+'''
 mnist = input_data.read_data_sets("MNIST_data/", one_hot=True)
 train_imgs = mnist.train.images
+print(type(train_imgs))
 train_labels = mnist.train.labels
 test_imgs = mnist.test.images
 test_labels = mnist.test.labels
 
 train_imgs = np.reshape(train_imgs, [-1, 28, 28, 1])
 test_imgs = np.reshape(test_imgs, [-1, 28, 28, 1])
+print(train_labels[0])
+'''
+
+train_imgs = []
+train_labels = []
+test_imgs = []
+test_labels = []
+label_size = 0
+with open('nlp/train.dat', 'r') as f:
+    for line in f:
+        elements = line.strip('\r\n').split('\t')
+        train_imgs.append(elements[0].split(','))
+        train_labels.append(elements[1])
+        if int(elements[1]) > label_size:
+            label_size = int(elements[1])
+    f.close()
+with open('nlp/val.dat', 'r') as f:
+    for line in f:
+        elements = line.strip('\r\n').split('\t')
+        test_imgs.append(elements[0].split(','))
+        test_labels.append(elements[1])
+        if int(elements[1]) > label_size:
+            label_size = int(elements[1])
+    f.close()
+label_size += 1
+train_imgs = np.asarray(train_imgs, dtype=np.int32)
+train_labels = np.eye(label_size)[np.asarray(train_labels, dtype=np.int32)]
+test_imgs = np.asarray(test_imgs, dtype=np.int32)
+test_labels = np.asarray(test_labels, dtype=np.int32)
+train_imgs = np.reshape(train_imgs, [-1, train_imgs.shape[1], 1, 1])
+test_imgs = np.reshape(test_imgs, [-1, test_imgs.shape[1], 1, 1])
 
 STAGES = np.array(["s1", "s2"])  # S
 NUM_NODES = np.array([3, 5])  # K
@@ -32,7 +64,7 @@ for nn in NUM_NODES:
 L = int(0.5 * L)
 
 TRAINING_EPOCHS = 20
-BATCH_SIZE = 20
+BATCH_SIZE = 512
 TOTAL_BATCHES = train_imgs.shape[0] #BATCH_SIZE
 
 def weight_variable(weight_name, weight_shape):
@@ -119,8 +151,8 @@ def generate_tensorflow_graph(individual, stages, num_nodes, bits_indices):
     activation_function_pattern = "/Relu:0"
 
     tf.reset_default_graph()
-    X = tf.placeholder(tf.float32, shape=[None, 28, 28, 1], name="X")
-    Y = tf.placeholder(tf.float32, [None, 10], name="Y")
+    X = tf.placeholder(tf.float32, shape=[None, 8, 1, 1], name="X")
+    Y = tf.placeholder(tf.float32, [None, 40], name="Y")
 
     d_node = X
     for stage_index, stage_name, num_node, bpi in zip(range(0, len(stages)),stages, num_nodes, bits_indices):
@@ -144,6 +176,7 @@ def generate_tensorflow_graph(individual, stages, num_nodes, bits_indices):
 
             # get DAG and nodes in the graph
             dag, nodes = generate_dag(indv, stage_name, num_node)
+            dag.toString()
             # get nodes without any predecessor, these will be connected to input node
             without_predecessors = dag.ind_nodes()
             # get nodes without any successor, these will be connected to output node
@@ -188,7 +221,7 @@ def generate_tensorflow_graph(individual, stages, num_nodes, bits_indices):
     shape = d_node.get_shape().as_list()
     flat = tf.reshape(d_node, [-1, shape[1] * shape[2] * shape[3]])
     logits500 = tf.nn.dropout(linear_layer(flat, 500, "logits500"), 0.5, name="dropout")
-    logits = linear_layer(logits500, 10, "logits")
+    logits = linear_layer(logits500, 40, "logits")
 
     xentropy = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=Y)
     loss_function = tf.reduce_mean(xentropy)
@@ -204,11 +237,14 @@ def evaluateModel(individual):
     with tf.Session() as session:
         tf.global_variables_initializer().run()
         for epoch in range(TRAINING_EPOCHS):
+            batch_acc = 0.0
             for b in range(TOTAL_BATCHES):
                 offset = (epoch * BATCH_SIZE) % (train_labels.shape[0] - BATCH_SIZE)
                 batch_x = train_imgs[offset:(offset + BATCH_SIZE), :, :, :]
                 batch_y = train_labels[offset:(offset + BATCH_SIZE), :]
-                _, c = session.run([optimizer, loss_function], feed_dict={X: batch_x, Y: batch_y})
+                _, c, accu = session.run([optimizer, loss_function, accuracy], feed_dict={X: batch_x, Y: batch_y})
+                batch_acc += accu
+            print('Epoch=%d, accuracy=%f' % (epoch, batch_acc / TOTAL_BATCHES))
 
         score = session.run(accuracy, feed_dict={X: test_imgs, Y: test_labels})
         print('Accuracy: ',score)
